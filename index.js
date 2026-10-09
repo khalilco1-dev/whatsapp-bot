@@ -8,7 +8,7 @@ const app = express();
 const port = process.env.PORT || 3000;
 let qrCodeData = null;
 
-// قائمة لتسجيل أرقام العملاء القادمين من الإعلان لمواصلة المحادثة معهم تلقائياً
+// قائمة لحفظ أرقام العملاء القادمين من الإعلان لمواصلة المحادثة معهم
 const activeCampaignLeads = new Set();
 
 // الكلمات المفتاحية التلقائية للإعلانات
@@ -17,11 +17,41 @@ const campaignKeywords = (process.env.CAMPAIGN_KEYWORDS || defaultKeywords)
     .split(',')
     .map(k => k.trim().toLowerCase());
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({
-    model: model: "gemini-1.5-flash-latest",
-    systemInstruction: process.env.SYSTEM_PROMPT || "أنت مساعد خدمة عملاء ذكي ومحترف. استقبل استفسارات العملاء القادمين من الإعلانات بلباقة، وأجب باختصار ووضوح، واجمع بياناتهم (الاسم، الخدمة أو الاستفسار المطلوب، والوقت المناسب للتواصل) لتأكيد الحجز."
-});
+const apiKey = process.env.GEMINI_API_KEY;
+if (!apiKey) {
+    console.error("تحذير: لم يتم العثور على متغير GEMINI_API_KEY في إعدادات البيئة!");
+}
+const genAI = new GoogleGenerativeAI(apiKey || "");
+
+// قائمة النماذج لتجربتها بالترتيب لضمان التوافق
+const MODEL_CANDIDATES = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash-latest",
+    "gemini-pro"
+];
+
+const systemInstruction = process.env.SYSTEM_PROMPT || "أنت مساعد خدمة عملاء ذكي ومحترف. استقبل استفسارات العملاء القادمين من الإعلانات بلباقة، وأجب باختصار ووضوح، واجمع بياناتهم (الاسم، الخدمة أو الاستفسار المطلوب، والوقت المناسب للتواصل) لتأكيد الحجز.";
+
+// دالة ذكية لإرسال الرسالة إلى Gemini وتجربة النماذج بالترتيب
+async function getGeminiResponse(userText) {
+    for (const modelName of MODEL_CANDIDATES) {
+        try {
+            const model = genAI.getGenerativeModel({
+                model: modelName,
+                systemInstruction: systemInstruction
+            });
+            const result = await model.generateContent(userText);
+            const reply = result.response.text();
+            if (reply) {
+                return reply;
+            }
+        } catch (err) {
+            console.log(`تعذر استخدام النموذج ${modelName}، جاري تجربة نموذج بديل...`);
+        }
+    }
+    throw new Error("فشلت جميع نماذج Gemini، يرجى التحقق من صحة مفتاح الـ API.");
+}
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('./auth_info');
@@ -37,11 +67,11 @@ async function startBot() {
         const { connection, lastDisconnect, qr } = update;
         if (qr) {
             qrCodeData = await QRCode.toDataURL(qr);
-            console.log('--- تم تجهيز رمز QR جديد، يرجى مسحه ---');
+            console.log('--- تم إنشاء رمز QR، يرجى مسحه من المتصفح ---');
         }
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log('انقطع الاتصال، جاري إعادة المحاولة:', shouldReconnect);
+            console.log('انقطع الاتصال، هل تتم المحاولة مجدداً؟', shouldReconnect);
             if (shouldReconnect) startBot();
         } else if (connection === 'open') {
             qrCodeData = null;
@@ -60,21 +90,19 @@ async function startBot() {
         const senderJid = m.key.remoteJid;
         const lowerText = userText.toLowerCase();
 
-        // فحص هل الرسالة تحتوي على كلمة من كلمات الحملة الإعلانية
+        // هل الرسالة تحتوي على كلمة من كلمات الحملة الإعلانية؟
         const isCampaignTrigger = campaignKeywords.some(keyword => lowerText.includes(keyword));
 
-        // الرد فقط إذا كانت الرسالة بداية حملة أو عميل إعلان مسجل لدينا مسبقاً
         if (isCampaignTrigger || activeCampaignLeads.has(senderJid)) {
             activeCampaignLeads.add(senderJid);
-            console.log(`[عميل إعلان] رسالة من ${senderJid}: "${userText}"`);
+            console.log(`[رسالة عميل إعلان] من ${senderJid}: "${userText}"`);
 
             try {
-                const result = await model.generateContent(userText);
-                const reply = result.response.text();
+                const reply = await getGeminiResponse(userText);
                 await sock.sendMessage(senderJid, { text: reply });
-                console.log(`[تم الرد بنجاح بنص Gemini]`);
+                console.log(`[تم الرد بنجاح بواسطة الذكاء الاصطناعي]`);
             } catch (err) {
-                console.error('خطأ في استجابة Gemini:', err);
+                console.error('خطأ أثناء توليد الرد:', err.message);
             }
         } else {
             console.log(`[تجاهل] رسالة عادية ليست من حملة إعلانية: ${senderJid}`);
@@ -84,7 +112,7 @@ async function startBot() {
 
 app.get('/', (req, res) => res.send('Bot is running! Go to /qr to connect.'));
 app.get('/qr', (req, res) => {
-    if (!qrCodeData) return res.send('<h3 style="text-align:center;margin-top:50px;">البوت متصل حالياً بنجاح، أو جاري تجهيز الرمز.. أعد تحديث الصفحة بعد ثوانٍ.</h3>');
+    if (!qrCodeData) return res.send('<h3 style="text-align:center;margin-top:50px;font-family:sans-serif;">البوت متصل حالياً بنجاح، أو جاري تجهيز الرمز.. أعد تحديث الصفحة بعد ثوانٍ.</h3>');
     res.send(`<html><body style="text-align:center;padding-top:40px;font-family:sans-serif;"><h2>امسح الرمز من واتساب هاتفك</h2><img src="${qrCodeData}" style="width:320px;height:320px;box-shadow:0 0 10px #ccc;border-radius:10px;"/></body></html>`);
 });
 
