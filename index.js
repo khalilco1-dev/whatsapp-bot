@@ -19,7 +19,7 @@ const campaignKeywords = (process.env.CAMPAIGN_KEYWORDS || defaultKeywords)
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: model: "gemini-1.5-flash-latest",
     systemInstruction: process.env.SYSTEM_PROMPT || "أنت مساعد خدمة عملاء ذكي ومحترف. استقبل استفسارات العملاء القادمين من الإعلانات بلباقة، وأجب باختصار ووضوح، واجمع بياناتهم (الاسم، الخدمة أو الاستفسار المطلوب، والوقت المناسب للتواصل) لتأكيد الحجز."
 });
 
