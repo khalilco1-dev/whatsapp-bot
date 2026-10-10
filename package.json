@@ -1,15 +1,16 @@
 {
-  "name": "whatsapp-gemini-bot",
+  "name": "whatsapp-bot",
   "version": "1.0.0",
+  "description": "WhatsApp AI Bot for Dental Clinic",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
-    "@whiskeysockets/baileys": "^6.7.12",
-    "express": "^4.21.0",
-    "pino": "^9.4.0",
-    "qrcode": "^1.5.4"
+    "@whiskeysockets/baileys": "^6.7.9",
+    "express": "^4.19.2",
+    "pino": "^9.0.0",
+    "qrcode": "^1.5.3"
   }
 }
