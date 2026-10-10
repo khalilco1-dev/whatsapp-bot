@@ -5,24 +5,19 @@ const QRCode = require('qrcode');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 8000;
 let qrCodeData = null;
 
-// حفظ أرقام العملاء القادمين من الإعلان لمواصلة الحديث معهم تلقائياً
 const activeCampaignLeads = new Set();
-
-// الكلمات المفتاحية التلقائية للإعلانات
 const defaultKeywords = "عرض,حجز,استفسار,تفاصيل,اعلان,إعلان,موعد,كشف,زراعة";
 const campaignKeywords = (process.env.CAMPAIGN_KEYWORDS || defaultKeywords)
     .split(',')
     .map(k => k.trim().toLowerCase());
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
-// استخدام النموذج المطابق لحسابك تماماً
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 const model = genAI.getGenerativeModel({
     model: "gemini-3-flash-preview",
-    systemInstruction: process.env.SYSTEM_PROMPT || "أنت مساعد خدمة عملاء ذكي ومحترف. استقبل استفسارات العملاء القادمين من الإعلانات بلباقة، وأجب باختصار ووضوح، واجمع بياناتهم (الاسم، الخدمة أو الاستفسار المطلوب، والوقت المناسب للتواصل) لتأكيد الحجز."
+    systemInstruction: process.env.SYSTEM_PROMPT || "أنت المساعد الشخصي الاستشاري للدكتور خليل عوض يوسف."
 });
 
 async function startBot() {
@@ -39,14 +34,14 @@ async function startBot() {
         const { connection, lastDisconnect, qr } = update;
         if (qr) {
             qrCodeData = await QRCode.toDataURL(qr);
-            console.log('--- رمز QR جاهز للمسح ---');
+            console.log('--- تم تجهيز رمز QR جديد ---');
         }
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
             if (shouldReconnect) startBot();
         } else if (connection === 'open') {
             qrCodeData = null;
-            console.log('=== تم اتصال واتساب بنجاح وهو جاهز للرد على الحملات! ===');
+            console.log('=== تم اتصال واتساب بالخادم بنجاح وبشكل مستقر! ===');
         }
     });
 
@@ -60,32 +55,26 @@ async function startBot() {
 
         const senderJid = m.key.remoteJid;
         const lowerText = userText.toLowerCase();
-
-        // فحص وجود كلمة مفتاحية خاصة بالحملة
         const isCampaignTrigger = campaignKeywords.some(keyword => lowerText.includes(keyword));
 
         if (isCampaignTrigger || activeCampaignLeads.has(senderJid)) {
             activeCampaignLeads.add(senderJid);
-            console.log(`[رسالة عميل إعلان] من ${senderJid}: "${userText}"`);
-
             try {
                 const result = await model.generateContent(userText);
                 const reply = result.response.text();
                 await sock.sendMessage(senderJid, { text: reply });
-                console.log(`[تم الرد بنجاح بواسطة Gemini]`);
+                console.log(`تم الرد على عميل الإعلان: ${senderJid}`);
             } catch (err) {
-                console.error('خطأ في استجابة Gemini:', err);
+                console.error('خطأ في استجابة Gemini:', err.message);
             }
-        } else {
-            console.log(`[تجاهل] رسالة ليست من حملة إعلانية: ${senderJid}`);
         }
     });
 }
 
-app.get('/', (req, res) => res.send('Bot is running! Go to /qr to connect.'));
+app.get('/', (req, res) => res.send('Bot is running on Koyeb! Go to /qr'));
 app.get('/qr', (req, res) => {
-    if (!qrCodeData) return res.send('<h3 style="text-align:center;margin-top:50px;">البوت متصل حالياً بنجاح، أو جاري تجهيز الرمز.. أعد تحديث الصفحة بعد ثوانٍ.</h3>');
-    res.send(`<html><body style="text-align:center;padding-top:40px;font-family:sans-serif;"><h2>امسح الرمز من واتساب هاتفك</h2><img src="${qrCodeData}" style="width:320px;height:320px;box-shadow:0 0 10px #ccc;border-radius:10px;"/></body></html>`);
+    if (!qrCodeData) return res.send('<h3 style="text-align:center;margin-top:50px;font-family:sans-serif;">البوت متصل حالياً بنجاح! إذا انقطع الاتصال سيظهر الرمز هنا.</h3>');
+    res.send(`<html><body style="text-align:center;padding-top:40px;font-family:sans-serif;"><h2>امسح الرمز من واتساب هاتفك</h2><img src="${qrCodeData}" style="width:320px;height:320px;border-radius:10px;box-shadow:0 0 10px #ccc;"/></body></html>`);
 });
 
 app.listen(port, () => {
